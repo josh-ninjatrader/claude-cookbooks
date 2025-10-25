@@ -15,6 +15,9 @@ Follow these steps for a comprehensive audit:
 
 1. **Identify the notebook**: Ask user for path if not provided
 2. **Run automated checks**: Use `python3 validate_notebook.py <path>` to catch technical issues and generate markdown
+   - The script automatically runs detect-secrets to scan for hardcoded API keys and credentials
+   - Uses custom patterns defined in `scripts/detect-secrets/plugins.py`
+   - Checks against baseline at `scripts/detect-secrets/.secrets.baseline`
 3. **Review markdown output**: The script generates a markdown file in the `tmp/` folder for easier review (saves context vs raw .ipynb)
    - The tmp/ folder is gitignored to avoid committing review artifacts
    - Markdown includes code cells but excludes outputs for cleaner review
@@ -67,7 +70,7 @@ Use this to ensure comprehensive coverage:
 
 **Code Quality**
 - [ ] All code blocks have explanatory text before them
-- [ ] No hardcoded API keys
+- [ ] No hardcoded API keys (automatically checked by detect-secrets)
 - [ ] Meaningful variable names
 - [ ] Comments explain "why" not "what"
 - [ ] Follows language best practices

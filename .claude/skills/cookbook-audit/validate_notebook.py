@@ -93,7 +93,93 @@ class NotebookValidator:
             return None
 
     def check_hardcoded_secrets(self):
-        """Check for hardcoded API keys and secrets."""
+        """Check for hardcoded API keys and secrets using detect-secrets."""
+        try:
+            # Run detect-secrets on the notebook file
+            # Use absolute path to ensure it works regardless of cwd
+            notebook_abs = self.notebook_path.absolute()
+
+            # Find project root (look for .git or go up until we find it)
+            project_root = notebook_abs.parent
+            while project_root.parent != project_root:
+                if (project_root / ".git").exists():
+                    break
+                project_root = project_root.parent
+
+            # Check for baseline in multiple locations
+            baseline_paths = [
+                project_root / "scripts" / "detect-secrets" / ".secrets.baseline",
+                project_root / ".secrets.baseline",
+            ]
+            baseline_path = None
+            for path in baseline_paths:
+                if path.exists():
+                    baseline_path = path
+                    break
+
+            # Build command with baseline if it exists
+            if baseline_path:
+                cmd = [
+                    "sh", "-c",
+                    f"echo '{notebook_abs}' | tr '\\n' '\\0' | xargs -0 uvx --from detect-secrets detect-secrets-hook --baseline {baseline_path}"
+                ]
+            else:
+                cmd = [
+                    "sh", "-c",
+                    f"echo '{notebook_abs}' | tr '\\n' '\\0' | xargs -0 uvx --from detect-secrets detect-secrets-hook"
+                ]
+
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                cwd=project_root  # Run from repo root for scripts/detect-secrets access
+            )
+
+            # detect-secrets returns non-zero exit code if secrets found
+            if result.returncode != 0:
+                # Check both stdout and stderr for output (detect-secrets uses stdout)
+                output = result.stdout.strip() or result.stderr.strip()
+
+                if output:
+                    # Extract secret locations from output
+                    secret_lines = [line for line in output.split('\n')
+                                   if 'Location:' in line or 'Secret Type:' in line]
+
+                    if secret_lines:
+                        self.issues.append(
+                            "Contains potential hardcoded secrets (see details below)"
+                        )
+                        # Print the full detect-secrets output for review
+                        print(f"\n{'='*60}")
+                        print("DETECT-SECRETS OUTPUT:")
+                        print(f"{'='*60}")
+                        print(output)
+                        print(f"{'='*60}\n")
+                    else:
+                        self.issues.append(
+                            f"Contains potential secrets. "
+                            f"Run 'detect-secrets-hook {self.notebook_path}' for details."
+                        )
+                else:
+                    self.issues.append(
+                        f"Potential secrets detected. "
+                        f"Run 'detect-secrets-hook {self.notebook_path}' for details."
+                    )
+
+        except FileNotFoundError:
+            # Fall back to basic pattern matching if detect-secrets not available
+            self.warnings.append(
+                "detect-secrets not found - using basic secret detection. "
+                "Install with: pip install detect-secrets"
+            )
+            self._check_hardcoded_secrets_fallback()
+        except Exception as e:
+            self.warnings.append(f"Error running detect-secrets: {e}")
+            self._check_hardcoded_secrets_fallback()
+
+    def _check_hardcoded_secrets_fallback(self):
+        """Fallback basic secret detection if detect-secrets unavailable."""
         patterns = {
             'Anthropic API key': r'sk-ant-[a-zA-Z0-9-]+',
             'OpenAI API key': r'sk-[a-zA-Z0-9]{32,}',
